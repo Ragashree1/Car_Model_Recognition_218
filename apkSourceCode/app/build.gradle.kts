@@ -54,4 +54,7 @@ dependencies {
     implementation("com.github.bumptech.glide:glide:4.12.0")
     implementation("androidx.activity:activity-ktx:1.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("org.pytorch:pytorch_android_lite:1.12.2")
+    implementation("org.pytorch:pytorch_android_torchvision_lite:1.12.2") // Optional for image processing
+
 }

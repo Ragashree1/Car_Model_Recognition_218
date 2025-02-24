@@ -1,5 +1,6 @@
 package com.example.carmodelpredictor
 
+import ImageClassifier
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -12,14 +13,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.io.IOException
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import android.Manifest
+import android.content.Context
 import androidx.appcompat.app.AlertDialog
 import android.content.Intent
 import android.provider.Settings
-
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class MainActivity : AppCompatActivity() {
 
@@ -27,8 +30,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnPickImage: Button
     private lateinit var btnTakePhoto: Button
     private lateinit var tvResult: TextView
-    private lateinit var imageClassifier: ImageClassifier
+    private var imageClassifier: ImageClassifier? = null
     private val PERMISSIONS_REQUEST_CODE = 101
+
+    fun assetFilePath(context: Context, assetName: String): String {
+        val file = File(context.filesDir, assetName)
+        if (!file.exists()) {
+            context.assets.open(assetName).use { inputStream ->
+                FileOutputStream(file).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+        }
+        return file.absolutePath
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,18 +64,17 @@ class MainActivity : AppCompatActivity() {
             finish()
         }
 
-        // Pick image from gallery
         btnPickImage.setOnClickListener {
             val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
             galleryLauncher.launch(intent)
         }
 
-        // Take photo using camera
         btnTakePhoto.setOnClickListener {
             val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
             cameraLauncher.launch(intent)
         }
     }
+
 
     private fun requestPermission() {
         val permissions = arrayOf(
@@ -73,22 +87,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (notGrantedPermissions.isNotEmpty()) {
-            // Check if user previously denied and selected "Don't ask again"
             val shouldShowRationale = notGrantedPermissions.any {
                 ActivityCompat.shouldShowRequestPermissionRationale(this, it)
             }
 
             if (shouldShowRationale) {
-                // Show a dialog explaining why permission is needed
                 showPermissionRationaleDialog(notGrantedPermissions)
             } else {
-                // Request permissions directly
                 ActivityCompat.requestPermissions(this, notGrantedPermissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
             }
         }
     }
 
-    // Show a dialog to explain why permissions are needed
     private fun showPermissionRationaleDialog(permissions: List<String>) {
         AlertDialog.Builder(this)
             .setTitle("Permission Required")
@@ -100,7 +110,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // Handle the permission request result
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
@@ -116,13 +125,11 @@ class MainActivity : AppCompatActivity() {
             if (deniedPermissions.isEmpty()) {
                 Toast.makeText(this, "All permissions granted", Toast.LENGTH_SHORT).show()
             } else {
-                // Check if user denied with "Don't ask again"
                 val permanentlyDeniedPermissions = deniedPermissions.filter {
                     !ActivityCompat.shouldShowRequestPermissionRationale(this, it)
                 }
 
                 if (permanentlyDeniedPermissions.isNotEmpty()) {
-                    // Show a dialog to open settings
                     showSettingsDialog()
                 } else {
                     Toast.makeText(this, "Permissions denied: $deniedPermissions", Toast.LENGTH_LONG).show()
@@ -131,7 +138,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Show dialog to direct user to settings
     private fun showSettingsDialog() {
         AlertDialog.Builder(this)
             .setTitle("Permission Required")
@@ -146,8 +152,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-
-    // Handle gallery image selection
     private val galleryLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
@@ -165,60 +169,47 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    // Handle camera capture
     private val cameraLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 val data: Intent? = result.data
                 val bitmap = data?.extras?.get("data") as? Bitmap
-                if (bitmap != null) {
-                    imageView.setImageBitmap(bitmap)
-                    processAndClassifyImage(bitmap)
-                } else {
-                    Toast.makeText(this, "Failed to capture image", Toast.LENGTH_SHORT).show()
-                }
+                bitmap?.let {
+                    imageView.setImageBitmap(it)
+                    processAndClassifyImage(it)
+                } ?: Toast.makeText(this, "Failed to capture image", Toast.LENGTH_SHORT).show()
             }
         }
 
-    // Function to resize and classify image
     private fun processAndClassifyImage(bitmap: Bitmap) {
         val resizedBitmap = resizeBitmap(bitmap, 224, 224)
         imageClassifier?.let { classifier ->
             val prediction = classifier.classifyImage(resizedBitmap)
             tvResult.text = "Prediction: $prediction"
-        }
+        } ?: Toast.makeText(this, "Classifier not initialized", Toast.LENGTH_SHORT).show()
     }
 
-
-    // Function to resize bitmap
     private fun resizeBitmap(bitmap: Bitmap, width: Int, height: Int): Bitmap {
         return Bitmap.createScaledBitmap(bitmap, width, height, true)
     }
 
-    // Convert bitmap to ByteBuffer in the format required by TensorFlow Lite
-    private fun convertBitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
-        val inputSize = 224
-        val byteBuffer = ByteBuffer.allocateDirect(1 * inputSize * inputSize * 3 * 4) // Float32 (4 bytes per value)
-        byteBuffer.order(ByteOrder.nativeOrder())
-
-        val intValues = IntArray(inputSize * inputSize)
-        bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-
-        for (pixelValue in intValues) {
-            val r = (pixelValue shr 16 and 0xFF) / 255.0f // Normalize
-            val g = (pixelValue shr 8 and 0xFF) / 255.0f
-            val b = (pixelValue and 0xFF) / 255.0f
-            byteBuffer.putFloat(r)
-            byteBuffer.putFloat(g)
-            byteBuffer.putFloat(b)
-        }
-        return byteBuffer
-    }
-
 //    override fun onDestroy() {
-//        (imageClassifier as? ImageClassifier)?.close()
-//        imageClassifier = None
+//        imageClassifier?.close()
+//        imageClassifier = null
 //        super.onDestroy()
 //    }
+    companion object {
+    fun assetFilePath(context: Context, assetName: String): String? {
+        val file = File(context.filesDir, assetName)
+        if (!file.exists()) {
+            context.assets.open(assetName).use { inputStream ->
+                FileOutputStream(file).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+        }
+        return file.absolutePath
 
+    }
+}
 }
