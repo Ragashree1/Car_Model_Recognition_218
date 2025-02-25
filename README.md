@@ -19,5 +19,5 @@ We developed an **Android application** using **Kotlin** to integrate the traine
 We used the **Stanford Cars Dataset**, which contains **196 car models**. The dataset is labeled with car model, label, and bounding box annotations, making it well-suited for fine-grained image classification tasks.  
 
 ## Repository Structure  
-- `/modelNotebooks` - Jupyter notebooks for training and evaluation  
-- `/ApkSourceCode` - Source code for the Android application   
+- `/ModelNotebooks` - Jupyter notebooks for training and evaluation  
+- `/apkSourceCode` - Source code for the Android application   
